@@ -1,7 +1,9 @@
 import Time
 import Data.Time.Calendar (gregorianMonthLength)
 import Data.List (intercalate)
-import System.Environment (getArgs)
+import System.Environment (getArgs, getProgName)
+import System.Console.GetOpt
+import Data.Char (isDigit)
 
 dayToInt :: Day -> Bool -> Int
 dayToInt day mondayFirst =
@@ -48,32 +50,54 @@ showDay Nothing = "  "
 showWeek :: [Maybe Int] -> String
 showWeek = intercalate " " . map showDay
 
+getYearAndMonth :: [String] -> Maybe (Int,Int)
+getYearAndMonth (y:m:args) =
+    if (digitsOnly y) && (digitsOnly m) && (month >= 1) && (month <= 12) then
+        Just (read y,month)
+    else Nothing
+    where digitsOnly s = filter (not . isDigit) s == ""
+          month = read m
+getYearAndMonth _ = Nothing
+
 getCalendarTime :: [String] -> IO CalendarTime
 getCalendarTime args = do
-    if (length args) == 2 then
-        getCalendarTimeFromArgs args
-        else do
-            clock <- getClockTime
-            ctNow <- toCalendarTime clock
-            return ctNow
+    let ym = getYearAndMonth args
+    case ym of Just (year, month) -> do
+                   let ct = (CalendarTime year (toEnum $ month - 1) 1 0 0 0 0 Sunday 0 "UTC" 0 False)
+                   toCalendarTime $ toClockTime $ ct
+               _ -> do
+                   clock <- getClockTime
+                   ctNow <- toCalendarTime clock
+                   return ctNow
 
-getCalendarTimeFromArgs :: [String] -> IO CalendarTime
-getCalendarTimeFromArgs args = do
-    let year = read $ args !! 0
-        month = toEnum ((read $ args !! 1) - 1)
-        ct = CalendarTime year month 1 0 0 0 0 Sunday 0 "UTC" 0 False
-    toCalendarTime $ toClockTime ct
+data Flag = StartWithMonday | StartWithSunday | Help deriving Eq
+
+options :: [OptDescr Flag]
+options = [Option ['M'] [] (NoArg StartWithMonday) "Weeks start on Monday",
+           Option ['S'] [] (NoArg StartWithSunday) "Weeks start on Sunday",
+           Option ['h'] ["help"] (NoArg Help) "Show usage information"]
+
+usage progName = usageInfo header options
+  where header = "Usage: " ++ progName ++ " [-M|-S] [<year> <month>]"
+
+getOpts :: String -> [String] -> IO ([Flag], [String])
+getOpts progName argv =
+    case getOpt RequireOrder options argv of
+        (o,n,[]) -> return (o,n)
+        (_,_,errs) -> ioError (userError (concat errs ++ usage progName))
 
 main = do
-    args <- getArgs
-    let firstDayFlag = (length args) > 0 && ((args !! 0) `elem` ["-M", "-S"])
-        mondayFirst = if firstDayFlag then args !! 0 == "-M" else True
-        args' = if firstDayFlag then drop 1 args else args
-    time <- getCalendarTime args'
-    let header = (show $ ctMonth time) ++ " " ++ (show $ ctYear time)
-        labels = intercalate " " $ map (\x -> take 2 $ show $ intToDay x mondayFirst) [0..6]
-        dif = fromIntegral $ (length labels) - (length header)
-        header' = if dif > 0 then (replicate (floor (dif / 2)) ' ') ++ header else header
-    mapM putStrLn (header':labels:(map showWeek $ getCal time mondayFirst))
-    return ()
+    argv <- getArgs
+    progName <- getProgName
+    (opts, args) <- getOpts progName argv
+    time <- getCalendarTime args
+    if Help `elem` opts then putStrLn $ usage progName
+        else do
+        let mondayFirst = not $ StartWithSunday `elem` opts
+            header = (show $ ctMonth time) ++ " " ++ (show $ ctYear time)
+            labels = intercalate " " $ map (\x -> take 2 $ show $ intToDay x mondayFirst) [0..6]
+            dif = fromIntegral $ (length labels) - (length header)
+            header' = if dif > 0 then (replicate (floor (dif / 2)) ' ') ++ header else header
+        mapM putStrLn (header':labels:(map showWeek $ getCal time mondayFirst))
+        return ()
 
