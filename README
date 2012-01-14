@@ -1,0 +1,2 @@
+cal.hs - displays a calendar (current month if not specified)
+ping.hs - simple Haskell version of the standard "ping" program
